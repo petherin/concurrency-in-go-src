@@ -41,6 +41,9 @@ These are explanatory notes linking to code examples.
     + [Confinement](#confinement)
       - [Ad Hoc](#ad-hoc)
       - [Lexical](#lexical)
+  * [The for-select Loop](#the-for-select-loop)
+    + [Sending Iteration Variables Out on a Channel](#sending-iteration-variables-out-on-a-channel)
+    + [Looping Infinitely Waiting to Be Stopped](#looping-infinitely-waiting-to-be-stopped)
 
 <!-- tocstop -->
 
@@ -343,4 +346,52 @@ Here is another example without channels, using a data structure that isn't conc
 The `printData` function has no access to the `data` variable declared outside it. Each concurrent instance of `printData` is passed a copy of some of the data instead. No synchronisation is required.
 
 Concurrent code that uses lexical confinement is simpler than concurrent code that has channels, mutexes, etc.
+
+### The for-select Loop
+This is used a lot in concurrent code. There are a couple of scenarios it's used for.
+
+#### Sending Iteration Variables Out on a Channel
+Often you'll want to convert a set of values, usually in a slice, into values on a channel, like this:
+
+```go
+for _, s := range []string{"a", "b", "c", "d"} {
+    select {
+    case <-done:
+        return
+    case stringStream <- s:
+    }
+}
+```
+
+#### Looping Infinitely Waiting to Be Stopped
+It's common to create goroutines that loop infinitely until stopped.
+
+The first of a couple of variations of this is below. It keeps the `select` as short as possible.
+
+```go
+for {
+    select {
+    case <-done:
+        return
+    default:
+    }
+
+    // Do non-preemptable work
+}
+```
+
+The second variation puts the work in the `default` case.
+
+```go
+for {
+    select {
+    case <-done:
+        return
+    default:
+        // Do non-preemptable work
+    }
+}
+```
+
+It's not complex but it's worth mentioning because it shows up all over concurrent code.
 
