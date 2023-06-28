@@ -35,6 +35,12 @@ These are explanatory notes linking to code examples.
     + [What Happens If None of the Channels Are Ever Ready?](#what-happens-if-none-of-the-channels-are-ever-ready)
     + [What Happens if No Channels Are Ready But We Need to Do Something Else?](#what-happens-if-no-channels-are-ready-but-we-need-to-do-something-else)
     + [Empty Select](#empty-select)
+- [Concurrency Patterns in Go](#concurrency-patterns-in-go)
+  * [Safe Operation of Concurrent Code](#safe-operation-of-concurrent-code)
+    + [Immutable Data](#immutable-data)
+    + [Confinement](#confinement)
+      - [Ad Hoc](#ad-hoc)
+      - [Lexical](#lexical)
 
 <!-- tocstop -->
 
@@ -283,3 +289,58 @@ We drop into the `default` case that leaves the `select`, we do our work, then b
 
 #### Empty Select
 `select {}` will block forever. May be useful in some contexts.
+
+## Concurrency Patterns in Go
+Before we get to patterns, here are some things to consider when working with concurrent code.
+
+### Safe Operation of Concurrent Code
+There are several ways to safely work with concurrent code.
+
+* synchronisation primitives for sharing memory (e.g. `sync.Mutex`)
+* synchronisation via communicating (e.g. channels)
+* immutable data
+* confinement
+
+The first two have been covered.
+
+#### Immutable Data
+If our concurrent processes only read data and never modify it, then it is implicitly concurrent-safe.
+
+If we want to modify data we can copy its value (not its pointer reference) and modify the copy.
+
+#### Confinement
+Confinement ensures data is only ever available from one concurrent process.
+
+When this is done, concurrent code is implicitly safe and synchronisation is unnecessary.
+
+This can be done in two ways:
+
+* ad hoc 
+* lexical
+
+##### Ad Hoc
+This is where a convention is agreed on where data is only accessed from one place/function/loop/etc, and everyone has to agree this is how it will be done.
+
+Here is an example where the `data` slice of integers is available from both the `loopData` function and the loop over the `handleData` channel. But by convention it's only accessed from the `loopData` function.
+
+[fig-confinement-ad-hoc.go](concurrency-patterns-in-go%2Fconfinement%2Ffig-confinement-ad-hoc.go)
+
+This breaks down the second someone commits code that breaks the convention.
+
+##### Lexical
+This involves scope in the code so you can't access the data from outside, say, a function, which restricts access to it.
+
+Here's an example. It creates a channel inside a function and writes to it. Nothing else can write to it. The `consumer` function can only read from it because the channel is passed as `results <-chan int`.
+
+[fig-confinement-ownership.go](concurrency-patterns-in-go%2Fconfinement%2Ffig-confinement-ownership.go)
+
+This isn't the best example because channels are concurrent-safe anyway.
+
+Here is another example without channels, using a data structure that isn't concurrent-safe.
+
+[fig-confinement-structs.go](concurrency-patterns-in-go%2Fconfinement%2Ffig-confinement-structs.go)
+
+The `printData` function has no access to the `data` variable declared outside it. Each concurrent instance of `printData` is passed a copy of some of the data instead. No synchronisation is required.
+
+Concurrent code that uses lexical confinement is simpler than concurrent code that has channels, mutexes, etc.
+
