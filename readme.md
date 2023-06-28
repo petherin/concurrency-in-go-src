@@ -44,6 +44,7 @@ These are explanatory notes linking to code examples.
   * [The for-select Loop](#the-for-select-loop)
     + [Sending Iteration Variables Out on a Channel](#sending-iteration-variables-out-on-a-channel)
     + [Looping Infinitely Waiting to Be Stopped](#looping-infinitely-waiting-to-be-stopped)
+  * [Preventing Goroutine Leaks](#preventing-goroutine-leaks)
 
 <!-- tocstop -->
 
@@ -394,4 +395,53 @@ for {
 ```
 
 It's not complex but it's worth mentioning because it shows up all over concurrent code.
+
+### Preventing Goroutine Leaks
+Goroutines are not garbage-collected so we don't want to leave them lying around. How do we ensure they're cleaned up?
+
+Goroutines terminate under three conditions:
+
+* It's completed its work
+* It cannot continue due to an unrecoverable error
+* It is told to stop
+
+We get the first two for free when our algorithms end or we get an eror.
+
+The parent or main goroutine should be able to tell its child goroutines to terminate.
+
+Here's an example of a goroutine that remains in memory for the lifetime of the process.
+
+[fig-goroutine-leaks-example.go](concurrency-patterns-in-go%2Fpreventing-goroutine-leaks%2Ffig-goroutine-leaks-example.go)
+
+`nil` is passed to `doWork` so no strings are put on the `strings` channel.
+
+To fix this we pass a `done` channel into `doWork`. By convention, it's a read-only channel called `done`.
+
+[fig-goroutine-leaks-cancellation.go](concurrency-patterns-in-go%2Fpreventing-goroutine-leaks%2Ffig-goroutine-leaks-cancellation.go)
+
+`doWork` listens for `done` on a `select` that also has a `default` so it can continue working.
+
+The `done` channel is closed by the main goroutine after 1 second has passed.
+
+The main goroutine blocks on `<-terminated`. When `doWork` returns it closes `terminated` and then `<-terminated` becomes unblocked and the program ends.
+
+Here is another example where a goroutine doesn't terminate because it can't write to a channel because nothing is receiving from it.
+
+[fig-leak-from-blocked-channel-write.go](concurrency-patterns-in-go%2Fpreventing-goroutine-leaks%2Ffig-leak-from-blocked-channel-write.go)
+
+`newRandStream` function creates a goroutine that writes to the `randStream` channel. It will block on `randStream <- rand.Int()` until the main goroutine loops over the returned `randStream` and reads off 3 values.
+
+When `newRandStream` tries to write a fourth value it blocks. Its deferred Println message is never done,.
+
+The fix is to send `newRandStream` a channel to tell it to stop.
+
+[fig-leak-from-blocked-channel-write-solved.go](concurrency-patterns-in-go%2Fpreventing-goroutine-leaks%2Ffig-leak-from-blocked-channel-write-solved.go)
+
+As before, a `done` channel is passed into the function and the function checks it in a `select`. 
+
+The other case is adding values into the `randStream` channel.
+
+In the main goroutine, `randStream` is read from 3 times and then `close(done)` is called.
+
+This hits the `case <-done` part of `newRandStream`'s `select`, and we return from the function, ending the goroutine.
 
