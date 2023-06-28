@@ -16,6 +16,7 @@ These are explanatory notes linking to code examples.
     + [Goroutine Closures in Loops](#goroutine-closures-in-loops)
     + [Goroutine Size](#goroutine-size)
     + [Goroutine Context Switching](#goroutine-context-switching)
+  * [The sync Package](#the-sync-package)
 
 <!-- tocstop -->
 
@@ -60,3 +61,4 @@ Go can context switch between goroutines very quickly. Typical times are 225 ns 
 
 Here's some code that times it: [fig-ctx-switch_test.go](gos-concurrency-building-blocks%2Fgoroutines%2Ffig-ctx-switch_test.go)
 
+### The sync Package
