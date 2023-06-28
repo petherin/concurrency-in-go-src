@@ -30,6 +30,11 @@ These are explanatory notes linking to code examples.
     + [Nil Channels](#nil-channels)
     + [Channel Owners Must Create, Write and Close the Channel](#channel-owners-must-create-write-and-close-the-channel)
     + [Channel Consumers (Non-Owners)](#channel-consumers-non-owners)
+  * [The select Statement](#the-select-statement)
+    + [What Happens When Multiple Cases Are Ready?](#what-happens-when-multiple-cases-are-ready)
+    + [What Happens If None of the Channels Are Ever Ready?](#what-happens-if-none-of-the-channels-are-ever-ready)
+    + [What Happens if No Channels Are Ready But We Need to Do Something Else?](#what-happens-if-no-channels-are-ready-but-we-need-to-do-something-else)
+    + [Empty Select](#empty-select)
 
 <!-- tocstop -->
 
@@ -237,3 +242,44 @@ Here's an example clarifying ownership and consumption of channels.
 [fig-chan-ownership.go](gos-concurrency-building-blocks%2Fchannels%2Ffig-chan-ownership.go)
 
 The lifecycle of the `resultStream` channel is encapsulated inside the `chanOwner` function.
+
+### The select Statement
+A `select` statement waits for channel reads and writes. It considers all cases simultaneously.
+
+[fig-select-blocking.go](gos-concurrency-building-blocks%2Fthe-select-statement%2Ffig-select-blocking.go)
+
+It blocks until one of the cases is ready.
+
+#### What Happens When Multiple Cases Are Ready?
+[fig-select-uniform-distribution.go](gos-concurrency-building-blocks%2Fthe-select-statement%2Ffig-select-uniform-distribution.go)
+
+This code example has two cases in the `select` and both are ready to be read from.
+
+Roughly half the time, the `select` reads from the `c1` channel, the other half from `c2`. This is by design. Go doesn't know which are the most important cases in a `select`, so if more than one is ready, it gives roughly equal precedence to them all.
+
+#### What Happens If None of the Channels Are Ever Ready?
+If this happens then the `select` will block forever.
+
+This isn't very useful but we can add a timeout.
+
+`time.After` returns a channel which becomes ready to read after the provided interval. An example of this is:
+
+[fig-select-timeouts.go](gos-concurrency-building-blocks%2Fthe-select-statement%2Ffig-select-timeouts.go)
+
+#### What Happens if No Channels Are Ready But We Need to Do Something Else?
+We can add a `default` case so something can be done while waiting for the channels in the `select` to be ready.
+
+Here's an example.
+
+[fig-select-default-clause.go](gos-concurrency-building-blocks%2Fthe-select-statement%2Ffig-select-default-clause.go)
+
+Usually you'll see a `select` containing a `default` case inside a `for` loop, so we can keep checking a channel but carry on past the `select` to do some other work.
+
+Here's an example.
+
+[fig-select-for-select-default.go](gos-concurrency-building-blocks%2Fthe-select-statement%2Ffig-select-for-select-default.go)
+
+We drop into the `default` case that leaves the `select`, we do our work, then because we're inside a `for`, we go back up and run the `select` again. Eventually the channel will be ready and we'll run that case and break out of the loop.
+
+#### Empty Select
+`select {}` will block forever. May be useful in some contexts.
