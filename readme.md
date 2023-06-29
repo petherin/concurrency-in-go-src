@@ -45,6 +45,8 @@ These are explanatory notes linking to code examples.
     + [Sending Iteration Variables Out on a Channel](#sending-iteration-variables-out-on-a-channel)
     + [Looping Infinitely Waiting to Be Stopped](#looping-infinitely-waiting-to-be-stopped)
   * [Preventing Goroutine Leaks](#preventing-goroutine-leaks)
+  * [The or-channel](#the-or-channel)
+  * [Error Handling](#error-handling)
 
 <!-- tocstop -->
 
@@ -445,3 +447,36 @@ In the main goroutine, `randStream` is read from 3 times and then `close(done)` 
 
 This hits the `case <-done` part of `newRandStream`'s `select`, and we return from the function, ending the goroutine.
 
+### The or-channel
+Sometimes you could have more than one `done` channel. You could check them all in a `select` but you might not know how many there are at runtime, and doing it in a `select` could be quite verbose.
+
+You can combine several `done` channels into an `or` channel, which can take a variadic number of channels and close all of them as soon as just one closes.
+
+Here's an example.
+
+[fig-or-channel.go](concurrency-patterns-in-go%2Fthe-or-channel%2Ffig-or-channel.go)
+
+It takes a variadic slice of channels and returns a single channel. If there are 0 it returns nil, or the single channel if there's just one.
+
+Otherwise the `or` function is called recursively until all channels have been added, and a single channel is returned.
+
+The code example blocks until one of the `done` channels is closed.
+
+### Error Handling
+It can be hard to reason about what a goroutine should do with an error. Here's an example where the goroutine just prints the error and continues through its loop.
+
+[fig-patterns-imporoper-err-handling.go](concurrency-patterns-in-go%2Ferror-handling%2Ffig-patterns-imporoper-err-handling.go)
+
+A better way to handle errors is to have concurrent processes send their errors to another part of the program that has complete information about the program's state.
+
+In the example below, the `checkStatus` function returns a `<-chan Result` where `Result` contains the response and an error.
+
+[fig-patterns-proper-err-handling.go](concurrency-patterns-in-go%2Ferror-handling%2Ffig-patterns-proper-err-handling.go)
+
+The main goroutine can range over the returned `<-chan Result` and handle any errors itself, rather than relying on the function that's doing the work.
+
+We can be more intelligent in our error handling. Here's an example of the code above that stops ranging over the returned channel if it receives 3 errors.
+
+[fig-stop-after-three-errors.go](concurrency-patterns-in-go%2Ferror-handling%2Ffig-stop-after-three-errors.go)
+
+The point of all this is that errors should be considered to be as important as the actual values returned from goroutines.
