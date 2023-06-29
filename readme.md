@@ -47,6 +47,12 @@ These are explanatory notes linking to code examples.
   * [Preventing Goroutine Leaks](#preventing-goroutine-leaks)
   * [The or-channel](#the-or-channel)
   * [Error Handling](#error-handling)
+  * [Pipelines](#pipelines)
+    + [Best Practices for Constructing Pipelines](#best-practices-for-constructing-pipelines)
+    + [Some Handy Generators](#some-handy-generators)
+      - [repeat](#repeat)
+      - [take](#take)
+      - [Type Assertion Stage](#type-assertion-stage)
 
 <!-- tocstop -->
 
@@ -480,3 +486,129 @@ We can be more intelligent in our error handling. Here's an example of the code 
 [fig-stop-after-three-errors.go](concurrency-patterns-in-go%2Ferror-handling%2Ffig-stop-after-three-errors.go)
 
 The point of all this is that errors should be considered to be as important as the actual values returned from goroutines.
+
+### Pipelines
+A pipeline is a series of stages that take data in, process it, and pass the data back out.
+
+Here is a non-concurrent example where the stages are `multiply` and `add`, and the two stages are combined to act on a slice of ints.
+
+[fig-functional-pipeline-combination.go](concurrency-patterns-in-go%2Fpipelines%2Ffig-functional-pipeline-combination.go)
+
+The `add` and `multiply` stages both consume and return the same type of `[]int`, meaning they can be combined to form a pipeline. The results of `add` can be fed into `multiply` and vice versa.
+
+This allows any combination of the stages and add as many as we want, e.g.
+
+[fig-adding-additional-stage-to-pipeline.go](concurrency-patterns-in-go%2Fpipelines%2Ffig-adding-additional-stage-to-pipeline.go)
+
+Because these functions take and return slices of data, the stages are performing _batch processing,_ as in they act on chunks of data all at once instead of one value at a time.
+
+_Stream processing_ is where the stages receive and emit one element at a time.
+
+This is how the above code looks if we use stream processing and process one value at a time.
+
+[fig-pipelines-func-stream-processing.go](concurrency-patterns-in-go%2Fpipelines%2Ffig-pipelines-func-stream-processing.go)
+
+In this method we are calling the pipeline _per iteration_, whereas before we were ranging over the pipeline's results.
+
+#### Best Practices for Constructing Pipelines
+Here's the above pipeline rewritten to use channels.
+
+[fig-pipelines-chan-stream-processing.go](concurrency-patterns-in-go%2Fpipelines%2Fbest-practices-for-constructing-pipelines%2Ffig-pipelines-chan-stream-processing.go)
+
+The `generator` function is a mainstay of pipeline code. It converts a discrete set of values into a stream of data on a channel.
+
+A `done` channel is passed in, as the idiomatic way of signalling a goroutine to stop.
+
+A variadic slice of `int` is also passed in , and a `<-chan int` is returned.
+
+Inside, a goroutine is started which ranges over the passed data, which has a `select` to listen to the `done` channel and to push integers onto the `chan int`. 
+
+The `multiply` and `add` functions have been changed to accept a `done` channel and an `<-chan int`, and they return `<-chan int` too.
+
+Inside, they start a goroutine which ranges over the incoming `<-chan int`. Inside the loop is a  `select` to listen for `done`. There is also a case where the current `int` is either multiplied or added to, which is then pushed onto the `<-chan int` to be returned.
+
+In the main goroutine, we get the `<-chan int` from `generator`. This is used to set a `pipeline` variable which is set to the result of stringing together the pipeline stages.
+
+The stages are, for a stream of numbers, multiply by two, add one, then multiply the result by two.
+
+Finally, we range over the `pipeline` variable to print out the results.
+
+This approach provides two benefits:
+
+1. Because channels are being used, we can range over the results, and at each stage we are running concurrent-safe code because the inputs and outputs are themselves concurrent-safe.
+2. Each stage of the pipeline is executing concurrently. So any stage only needs to wait for its inputs, and to be able to send its outputs.
+
+Below is a table showing what values are on which channels, at each stage of the `for` loop. Multiple events occur during a single iteration - these are the steps.
+
+| Iteration | Step | Generator (from incoming _[]int_) | Multiply (from _<-chan int_ <br/>returned by generator)                                                              | Add (from _<-chan int_ returned<br/>from multipler which multiples by 2)                                                                                     | Second Multiply (from _<-chan int_ returned <br/>by add which adds 1) | Value (from _<-chan int_ returned by second <br/>multiply which multiples by 2) |
+|-----------|------|--------------------------------------------------------------|------------------------------------------------------------------------|------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| 0         | 1    | 1                                                            |                                                                   |                                                                                          |                                                                                       |                                                                                 |
+| 0         | 2    |                                                                  | 1                                                            |                                                                                          |                                                                                       |                                                                                 |
+| 0         | 3    |2                                                                 |                                                              | 2  |                                                                                       |                                                                                 |
+| 0         | 4    |                                                                 | 2                                                            |                                                                                          | 3                                                                                     |                                                                                 |
+| 0         | 5    |3                                                                 |                                                              | 4                                                                                        |                                                                                       | 6                                                                               |
+| 1         | 6    |                                                                  | 3                                                            |                                                                                          | 5                                                                                     |                                                                                 |
+| 1         | 7    |4                                                                 |                                                              | 6                                                                                        |                                                                                       | 10                                                                              |
+| 2         | 8    |(closed)                                                          | 4                                                            |                                                                                          | 7                                                                                     |                                                                                 |
+| 2         | 9    |                                                                  | (closed)                                                     | 8                                                                                        |                                                                                       | 14                                                                              |
+| 3         | 10   |                                                                  |                                                              | (closed)                                                                                 | 9                                                                                     |                                                                                 |
+| 3         | 11   |                                                                  |                                                              |                                                                                          | (closed)                                                                              | 18                                                                              |
+
+All of the above can't start until we start reading from the pipeline.
+
+The chain of channels is:
+
+`generator` -> `multiply` -> `add` -> `multiply`
+
+Nothing can be added to `generator` because the entire pipeline is blocked until something is ready to read from `multiply` at the end.
+
+This happens when we start ranging over `pipeline`, which contains the channel returned by the last `multiply`.
+
+Here are the first 5 steps, covering the first iteration of the main goroutine's `for` loop.
+
+1. The first value (1) in the slice of ints sent to the `generator` function can now be pushed onto `generator`'s `intStream`.
+2. The range loop in `multiplier` can now get the 1, and add it to `multiplier`'s channel.
+3. Now that the `generator` channel is free, the next number, 2, can be pushed to it. Concurrently, the 1, now multiplied to 2, moves to the `add` channel.
+4. The first `multiply` channel gets the 2 from `generator`. At the same time, the range in the second `multiply` gets the value (now 3) from the `add` channel.
+5. The next value 3 can go onto the `generator` channel. At the same time, the `add` function gets 4 from the `multiplier` channel. Also at the same time, 6 is read from the second `multiply` channel and is the first number to be printed out.
+
+The remaining iterations are more of the same.
+
+The pipeline can be stopped at any stage by calling `close(done)`. All stages are checking `done`, and the channels they range over will `break `when an upstream stage closes its channel.
+
+#### Some Handy Generators
+A generator for a pipeline is any function that converts a set of discrete values into a stream of values on a channel.
+
+##### repeat
+A `repeat` generator repeats the values passed to it infinitely, until told to stop. An example is included in the next section.
+
+##### take
+This will only take the specified number of items from its incoming channel, and then exit. With `repeat`, it can be very powerful.
+
+[fig-take-and-repeat-pipeline.go](concurrency-patterns-in-go%2Fpipelines%2Fsome-handy-generators%2Ffig-take-and-repeat-pipeline.go)
+
+The lines that construct the pipeline are:
+
+```
+for num := range take(done, repeat(done, 1), 10) {
+    fmt.Printf("%v ", num)
+}
+```
+The `repeat` _could_ generate an infinite number of values, but because it is blocked waiting for `take` to read from its channel, and `take` is getting a set number of items, this makes `repeat` very efficient.
+
+##### Type Assertion Stage
+The `repeat` and `take` examples consume and return `chan interface{}` because the author of the book states it's useful to have a library of generators where they can handle any type.
+
+With generics in Go, it feels like we could still have a general library of generators but they could be a constrained set of generic types.
+
+For completeness, here's an example from the book that introduces a type assertions stage to convert a `chan interface{}` to a specific type, in this case `chan string`.
+
+[fig-utilizing-string-stage.go](concurrency-patterns-in-go%2Fpipelines%2Fsome-handy-generators%2Ffig-utilizing-string-stage.go)
+
+It's used like this, as the outer stage of a pipeline:
+
+```go
+for token := range toString(done, take(done, repeat(done, "I", "am."), 5)) {
+    message += token
+}
+```
