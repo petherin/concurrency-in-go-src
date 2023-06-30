@@ -54,6 +54,7 @@ These are explanatory notes linking to code examples.
       - [take](#take)
       - [Type Assertion Stage](#type-assertion-stage)
   * [Fan-Out, Fan-In](#fan-out-fan-in)
+  * [The or-done-channel](#the-or-done-channel)
 
 <!-- tocstop -->
 
@@ -80,7 +81,7 @@ The code prints out `good day` 3 times, instead of each of the slice's values. W
 
 The goroutine closes over the iteration variable `salutation`.
 
-Usually, the loop finishes before the goroutines inside the lop have a chance to start. So what is the value of `salutation`? It's the last value in the slice because it looped over everything and the last value was `good day`.
+Usually, the loop finishes before the goroutines inside the loop have a chance to start. So what is the value of `salutation`? It's the last value in the slice because it looped over everything and the last value was `good day`.
 
 Then the goroutines start and they hold onto the closed over `salutation` variable, which are all `good day`.
 
@@ -158,7 +159,7 @@ This code [fig-sync-pool.go](gos-concurrency-building-blocks%2Fthe-sync-package%
 
 It creates 1,048,576 goroutines, each one calling `Get` on a pool, swiftly followed by `Put`. 
 
-Because a lot of goroutines are getting but then replacing items from the pool, there are previously allocated items in the pool for the next goroutine to use, as opposed to having a create a new one.
+Because a lot of goroutines are getting but then replacing items from the pool, there are previously allocated items in the pool for the next goroutine to use, as opposed to having to create a new one.
 
 When running the above code multiple times you get different numbers of created items, typically 10-16.
 
@@ -414,7 +415,7 @@ Goroutines terminate under three conditions:
 * It cannot continue due to an unrecoverable error
 * It is told to stop
 
-We get the first two for free when our algorithms end or we get an eror.
+We get the first two for free when our algorithms end, or we get an error.
 
 The parent or main goroutine should be able to tell its child goroutines to terminate.
 
@@ -440,7 +441,7 @@ Here is another example where a goroutine doesn't terminate because it can't wri
 
 `newRandStream` function creates a goroutine that writes to the `randStream` channel. It will block on `randStream <- rand.Int()` until the main goroutine loops over the returned `randStream` and reads off 3 values.
 
-When `newRandStream` tries to write a fourth value it blocks. Its deferred Println message is never done,.
+When `newRandStream` tries to write a fourth value it blocks. Its deferred `Println` message is never done.
 
 The fix is to send `newRandStream` a channel to tell it to stop.
 
@@ -541,25 +542,25 @@ This approach provides two benefits:
 
 Below is a table showing what values are on which channels, at each stage of the `for` loop. Multiple events occur during a single iteration - these are the steps.
 
-| Iteration | Step | Generator (from incoming _[]int_) | Multiply (from _<-chan int_ <br/>returned by generator)                                                              | Add (from _<-chan int_ returned<br/>from multipler which multiples by 2)                                                                                     | Second Multiply (from _<-chan int_ returned <br/>by add which adds 1) | Value (from _<-chan int_ returned by second <br/>multiply which multiples by 2) |
-|-----------|------|--------------------------------------------------------------|------------------------------------------------------------------------|------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| 0         | 1    | 1                                                            |                                                                   |                                                                                          |                                                                                       |                                                                                 |
-| 0         | 2    |                                                                  | 1                                                            |                                                                                          |                                                                                       |                                                                                 |
-| 0         | 3    |2                                                                 |                                                              | 2  |                                                                                       |                                                                                 |
-| 0         | 4    |                                                                 | 2                                                            |                                                                                          | 3                                                                                     |                                                                                 |
-| 0         | 5    |3                                                                 |                                                              | 4                                                                                        |                                                                                       | 6                                                                               |
-| 1         | 6    |                                                                  | 3                                                            |                                                                                          | 5                                                                                     |                                                                                 |
-| 1         | 7    |4                                                                 |                                                              | 6                                                                                        |                                                                                       | 10                                                                              |
-| 2         | 8    |(closed)                                                          | 4                                                            |                                                                                          | 7                                                                                     |                                                                                 |
-| 2         | 9    |                                                                  | (closed)                                                     | 8                                                                                        |                                                                                       | 14                                                                              |
-| 3         | 10   |                                                                  |                                                              | (closed)                                                                                 | 9                                                                                     |                                                                                 |
-| 3         | 11   |                                                                  |                                                              |                                                                                          | (closed)                                                                              | 18                                                                              |
+| Iteration | Step | Generator (from incoming _[]int_) | Multiply (from _<-chan int_ <br/>returned by Generator) | Add (from _<-chan int_ returned<br/>from Multipler which multiples by 2) | Second Multiply (from _<-chan int_ returned <br/>by Add which adds 1) | Value (from _<-chan int_ returned by second <br/>Multiply which multiples by 2) |
+|-----------|------|--------------------------------------------------------------|---------------------------------------------------------|--------------------------------------------------------------------------|-----------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| 0         | 1    | 1                                                            |                                                         |                                                                          |                                                                       |                                                                                 |
+| 0         | 2    |                                                                  | 1                                                       |                                                                          |                                                                       |                                                                                 |
+| 0         | 3    |2                                                                 |                                                         | 2                                                                        |                                                                       |                                                                                 |
+| 0         | 4    |                                                                 | 2                                                       |                                                                          | 3                                                                     |                                                                                 |
+| 0         | 5    |3                                                                 |                                                         | 4                                                                        |                                                                       | 6                                                                               |
+| 1         | 6    |                                                                  | 3                                                       |                                                                          | 5                                                                     |                                                                                 |
+| 1         | 7    |4                                                                 |                                                         | 6                                                                        |                                                                       | 10                                                                              |
+| 2         | 8    |(closed)                                                          | 4                                                       |                                                                          | 7                                                                     |                                                                                 |
+| 2         | 9    |                                                                  | (closed)                                                | 8                                                                        |                                                                       | 14                                                                              |
+| 3         | 10   |                                                                  |                                                         | (closed)                                                                 | 9                                                                     |                                                                                 |
+| 3         | 11   |                                                                  |                                                         |                                                                          | (closed)                                                              | 18                                                                              |
 
 All of the above can't start until we start reading from the pipeline.
 
 The chain of channels is:
 
-`generator` -> `multiply` -> `add` -> `multiply`
+`generator -> multiply -> add -> multiply`
 
 Nothing can be added to `generator` because the entire pipeline is blocked until something is ready to read from `multiply` at the end.
 
@@ -567,11 +568,11 @@ This happens when we start ranging over `pipeline`, which contains the channel r
 
 Here are the first 5 steps, covering the first iteration of the main goroutine's `for` loop.
 
-1. The first value (1) in the slice of ints sent to the `generator` function can now be pushed onto `generator`'s `intStream`.
+1. The first value (1) in the slice of `ints` sent to the `generator` function can now be pushed onto `generator`'s `intStream`.
 2. The range loop in `multiplier` can now get the 1, and add it to `multiplier`'s channel.
-3. Now that the `generator` channel is free, the next number, 2, can be pushed to it. Concurrently, the 1, now multiplied to 2, moves to the `add` channel.
-4. The first `multiply` channel gets the 2 from `generator`. At the same time, the range in the second `multiply` gets the value (now 3) from the `add` channel.
-5. The next value 3 can go onto the `generator` channel. At the same time, the `add` function gets 4 from the `multiplier` channel. Also at the same time, 6 is read from the second `multiply` channel and is the first number to be printed out.
+3. Now that the `generator` channel is free, the next number, 2, can be pushed to it. **Concurrently**, the 1, now multiplied to 2, moves to the `add` channel.
+4. The first `multiply` channel gets the 2 from `generator`. **Concurrently**, the range in the second `multiply` gets the value (now 3) from the `add` channel.
+5. The next value 3 can go onto the `generator` channel. **Concurrently**, the `add` function gets 4 from the `multiplier` channel. **Also Concurrently**, the 3 (now multiplied to 6) is read from the second `multiply` channel and is the first number to be printed out.
 
 The remaining iterations are more of the same.
 
@@ -687,3 +688,42 @@ Here's the fan-out. Instead of `primeFinder` being included in the pipeline and 
 In the pipeline that we range over, we replace `primeFinder(done, randIntStream)` with `fanIn(done, finders...)` which converts the multiple channels from the slice of finders into a single channel.
 
 This speeds things up.
+
+### The or-done-channel
+Sometimes you will be using channels from all over the place in your code. You can't be sure that if you cancel a goroutine using a `done` channel, the goroutine will behave properly and cancel the channels _it_ returns.
+
+You could write cumbersome code to wrap the channel in a `for` and `select` to check for `done` and to check if the channel is returning `false` for its second return value. But it gets untidy if there are further channels you need to check.
+
+The `or-done-channel` is a function that encapsulates this logic so you can just write:
+
+```go
+for val := range orDone(done, myChan) {
+	// Do something with val
+}
+```
+
+This is the `orDone` function.
+
+```go
+orDone := func(done, c <-chan interface{}) <-chan interface{} {
+    valStream := make(chan interface{})
+    go func() {
+        defer close(valStream)
+        for {
+            select {
+            case <-done:
+                return
+            case v, ok := <-c:
+                if ok == false {
+                    return
+                }
+                select {
+                case valStream <- v:
+                case <-done:
+                }
+            }
+        }
+    }()
+    return valStream
+}
+```
