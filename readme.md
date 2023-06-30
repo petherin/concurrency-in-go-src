@@ -53,6 +53,7 @@ These are explanatory notes linking to code examples.
       - [repeat](#repeat)
       - [take](#take)
       - [Type Assertion Stage](#type-assertion-stage)
+  * [Fan-Out, Fan-In](#fan-out-fan-in)
 
 <!-- tocstop -->
 
@@ -612,3 +613,77 @@ for token := range toString(done, take(done, repeat(done, "I", "am."), 5)) {
     message += token
 }
 ```
+
+### Fan-Out, Fan-In
+If a stage of your pipeline is slow, then upstream stages can become blocked and the entire pipeline can slow down.
+
+A slow stage can be re-used on multiple goroutines to speed it up - this is fan-out, fan-in.
+
+Fan-out is starting multiple goroutines to handle input from the pipeline.
+
+Fan-in is combining multiple results into one channel.
+
+You could consider this pattern if:
+
+* the stage doesn't rely on values that the stage before has calculated, in other words, the stage is order-independent
+* it takes a long time to run
+
+Here is an inefficient prime number finder with a slow `primeFinder` stage.
+
+[fig-naive-prime-finder.go](concurrency-patterns-in-go%2Ffan-out-fan-in%2Ffig-naive-prime-finder.go)
+
+The pipeline bit is:
+
+```go
+randIntStream := toInt(done, repeatFn(done, rand))
+fmt.Println("Primes:")
+for prime := range take(done, primeFinder(done, randIntStream), 10) {
+    fmt.Printf("\t%d\n", prime)
+}
+```
+
+`repeatFn` is a stage that takes `rand`, a function that returns a random number as an `interface{}`. 
+
+`repeatFn` returns `<-chan interface{}` so we wrap it in `toInt` which returns `<-chan int`.
+
+We then loop over a pipeline of `take(done, primeFinder(done, randIntStream), 10)`.
+
+Inside the pipeline, the `randIntStream <-chan int` is passed to `primeFinder`, which feeds into `take` which takes 10 results.
+
+`primeFinder` is slow so it would improve the speed of the pipeline if several concurrent `primeFinder`s were running.
+
+Here's the fan-out, fan-in version that does that.
+
+[fig-fan-out-naive-prime-finder.go](concurrency-patterns-in-go%2Ffan-out-fan-in%2Ffig-fan-out-naive-prime-finder.go)
+
+There is a new `fanIn` stage that takes in a variadic slice of channels `...<-chan interface{}`.
+
+It declares a `chan interface{}` and returns it as `<-chan interface{}`.
+
+It declares a function that takes `<-chan interface{}`, ranges over it, and pushes to the channel the function returns.
+
+For each `<-chan interface{}` we call the function that gets the values from a channel.
+
+A WaitGroup waits for the `...<-chan interface{}` to all be processed and closes the returned channel.
+
+The bit in the main goroutine that constructs the pipeline is different from the previous version.
+
+```go
+numFinders := runtime.NumCPU()
+fmt.Printf("Spinning up %d prime finders.\n", numFinders)
+finders := make([]<-chan interface{}, numFinders)
+fmt.Println("Primes:")
+for i := 0; i < numFinders; i++ {
+    finders[i] = primeFinder(done, randIntStream)
+}
+
+for prime := range take(done, fanIn(done, finders...), 10) {
+    fmt.Printf("\t%d\n", prime)
+}
+```
+
+Here's the fan-out. Instead of `primeFinder` being included in the pipeline and ranged over, several `primeFinder`s are called and added to a slice of finders - `[]<-chan interface{}`.
+
+In the pipeline that we range over, we replace `primeFinder(done, randIntStream)` with `fanIn(done, finders...)` which converts the multiple channels from the slice of finders into a single channel.
+
+This speeds things up.
